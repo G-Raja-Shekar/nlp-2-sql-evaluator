@@ -3,11 +3,124 @@ Main entry point for running SQL evaluations.
 """
 
 import json
+import os
 from typing import List, Dict, Any
+
+try:
+    import pandas as pd
+except ImportError:
+    print("❌ Error: pandas is required to read Excel files. Please install it with: pip install pandas")
+    pd = None
+
 from sql_evaluator import SQLEvaluator, BatchEvaluator
 from sql_evaluator.models import EvaluationRequest, CustomEvaluationRequest
 from sql_evaluator.exporters import ExcelExporter
 from sql_evaluator.utils import SimilarityCalculator
+
+# Constants
+DEFAULT_EXCEL_PATH = "assets/test_file.xlsx"
+
+
+def load_batch_evaluations_from_excel(excel_path: str = DEFAULT_EXCEL_PATH) -> List[Dict[str, Any]]:
+    """
+    Load batch evaluation data from Excel file.
+    
+    Args:
+        excel_path: Path to the Excel file
+        
+    Returns:
+        List of evaluation dictionaries
+    """
+    if pd is None:
+        print("❌ Error: pandas is not available. Cannot read Excel files.")
+        return []
+        
+    try:
+        # Check if file exists
+        if not os.path.exists(excel_path):
+            raise FileNotFoundError(f"Excel file not found: {excel_path}")
+        
+        # Read Excel file
+        df = pd.read_excel(excel_path)
+        
+        # Validate required columns
+        required_columns = ['S No', 'Question', 'Expected_Query', 'Generated_Query']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            raise ValueError(f"Missing required columns: {missing_columns}")
+        
+        # Convert DataFrame to list of dictionaries matching the expected format
+        batch_evaluations = []
+        
+        for index, row in df.iterrows():
+            # Skip rows with empty essential data
+            if pd.isna(row['Question']) or pd.isna(row['Expected_Query']) or pd.isna(row['Generated_Query']):
+                print(f"⚠️  Skipping row {index + 1} due to missing essential data")
+                continue
+                
+            evaluation_dict = {
+                "natural_query": str(row['Question']).strip(),
+                "expected_sql": str(row['Expected_Query']).strip(),
+                "generated_sql": str(row['Generated_Query']).strip(),
+                "session_id": "excel_batch_evaluation",
+                "metadata": {
+                    "source": "excel",
+                    "row_number": int(row['S No']) if not pd.isna(row['S No']) else index + 1,
+                    "file_path": excel_path
+                }
+            }
+            batch_evaluations.append(evaluation_dict)
+        
+        print(f"✅ Successfully loaded {len(batch_evaluations)} evaluations from {excel_path}")
+        return batch_evaluations
+        
+    except FileNotFoundError as e:
+        print(f"❌ Error: {e}")
+        return []
+    except Exception as e:
+        print(f"❌ Error loading Excel file: {e}")
+        return []
+
+
+def run_batch_evaluation_from_excel(excel_path: str = DEFAULT_EXCEL_PATH):
+    """
+    Run batch evaluation using data from Excel file and export results to Excel.
+    
+    Args:
+        excel_path: Path to the Excel file containing evaluation data
+    """
+    print("🚀 Starting Batch SQL Evaluation from Excel File")
+    print("=" * 60)
+    print(f"📁 Reading data from: {excel_path}")
+    
+    # Load evaluation data from Excel
+    batch_evaluations = load_batch_evaluations_from_excel(excel_path)
+    
+    if not batch_evaluations:
+        print("❌ No evaluation data loaded. Please check the Excel file.")
+        return
+    
+    print(f"📊 Loaded {len(batch_evaluations)} evaluation cases")
+    
+    # Initialize batch evaluator
+    batch_evaluator = BatchEvaluator()
+    
+    # Run batch evaluation
+    results = batch_evaluator.evaluate_batch(batch_evaluations)
+    
+    # Print summary
+    batch_evaluator.print_batch_summary(results)
+    
+    # Export to Excel
+    exporter = ExcelExporter()
+    excel_filename = exporter.export(results)
+    
+    if excel_filename:
+        print("\n✅ Batch evaluation completed successfully!")
+        print(f"📊 Results exported to: {excel_filename}")
+    
+    return results
 
 
 def run_batch_evaluation_from_test_data():
@@ -39,7 +152,7 @@ def run_batch_evaluation_from_test_data():
     excel_filename = exporter.export(results)
     
     if excel_filename:
-        print(f"\n✅ Batch evaluation completed successfully!")
+        print("\n✅ Batch evaluation completed successfully!")
         print(f"📊 Results exported to: {excel_filename}")
     
     return results
@@ -164,8 +277,22 @@ if __name__ == "__main__":
     # Choose which demo to run
     import sys
     
-    if len(sys.argv) > 1 and sys.argv[1] == "demo":
-        demonstrate_evaluations()
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "demo":
+            demonstrate_evaluations()
+        elif sys.argv[1] == "test_data":
+            # Run batch evaluation from test_data.py
+            run_batch_evaluation_from_test_data()
+        elif sys.argv[1] == "excel":
+            # Run batch evaluation from Excel file (with optional custom path)
+            excel_path = sys.argv[2] if len(sys.argv) > 2 else DEFAULT_EXCEL_PATH
+            run_batch_evaluation_from_excel(excel_path)
+        else:
+            print("Usage:")
+            print("  python main.py              # Run Excel evaluation (default)")
+            print("  python main.py demo         # Run demonstration")
+            print("  python main.py test_data    # Run from test_data.py")
+            print("  python main.py excel [path] # Run from Excel file")
     else:
-        # Run batch evaluation from test data by default
-        run_batch_evaluation_from_test_data()
+        # Run batch evaluation from Excel file by default
+        run_batch_evaluation_from_excel()
